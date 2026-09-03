@@ -12,14 +12,17 @@ export default async function handler(req, res) {
     try {
       const response = await fetch(`${worker}/jobs/${encodeURIComponent(jobId)}`, {
         headers: process.env.GPU_WORKER_TOKEN ? { authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}` } : {},
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(15000)
       });
       const text = await response.text();
       let data;
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
-      if (response.ok) return res.status(response.status).json(data);
+      if (response.ok) {
+        if (data.output_url && data.output_url.startsWith('/')) data.output_url = `${worker}${data.output_url}`;
+        return res.status(response.status).json(data);
+      }
       lastError = data.error || `Worker returned HTTP ${response.status}`;
     } catch (error) { lastError = error.message || lastError; }
   }
-  return res.status(404).json({ error: lastError, code: 'JOB_NOT_FOUND' });
+  return res.status(404).json({ error: lastError, code: 'GPU_JOB_NOT_FOUND' });
 }
