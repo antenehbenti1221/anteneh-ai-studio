@@ -8,10 +8,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.3.0")
+app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.4.0")
 ROOT = Path(os.getenv("WORK_DIR", "/tmp/anteneh-ai-jobs"))
 ROOT.mkdir(parents=True, exist_ok=True)
-RUNNER = os.getenv("VIDEO_RUNNER_CMD", "")
+RUNNER = os.getenv("VIDEO_RUNNER_CMD", "python runner.py {job} {output}")
 
 class Job(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
@@ -32,9 +32,6 @@ async def run_job(job_id: str):
     job_file = folder / "job.json"
     output = folder / "final.mp4"
     write_status(folder, "running")
-    if not RUNNER:
-        write_status(folder, "waiting_for_runner", message="Configure VIDEO_RUNNER_CMD on the GPU host")
-        return
     try:
         cmd = RUNNER.format(job=str(job_file), output=str(output))
         proc = await asyncio.create_subprocess_shell(cmd, cwd=str(folder))
@@ -48,7 +45,7 @@ async def run_job(job_id: str):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "worker": "remote-gpu", "model": os.getenv("VIDEO_MODEL", "Wan2.2-TI2V-5B"), "runner_configured": bool(RUNNER)}
+    return {"ok": True, "worker": "remote-gpu", "model": os.getenv("VIDEO_MODEL", "Wan2.2-TI2V-5B"), "runner_configured": bool(os.getenv("VIDEO_COMMAND"))}
 
 @app.post("/jobs")
 async def create_job(job: Job):
