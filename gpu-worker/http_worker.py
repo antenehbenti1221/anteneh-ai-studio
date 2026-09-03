@@ -5,9 +5,10 @@ import os
 import uuid
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.2.0")
+app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.3.0")
 ROOT = Path(os.getenv("WORK_DIR", "/tmp/anteneh-ai-jobs"))
 ROOT.mkdir(parents=True, exist_ok=True)
 RUNNER = os.getenv("VIDEO_RUNNER_CMD", "")
@@ -20,6 +21,8 @@ class Job(BaseModel):
     input_type: str = "text"
     image_url: str | None = None
     avatar: bool = False
+    voice: str = "default"
+    style: str = "educational"
 
 def write_status(folder: Path, status: str, **extra):
     (folder / "status.json").write_text(json.dumps({"status": status, **extra}), encoding="utf-8")
@@ -37,7 +40,7 @@ async def run_job(job_id: str):
         proc = await asyncio.create_subprocess_shell(cmd, cwd=str(folder))
         code = await proc.wait()
         if code == 0 and output.exists() and output.stat().st_size > 0:
-            write_status(folder, "completed", output=str(output))
+            write_status(folder, "completed")
         else:
             write_status(folder, "failed", exit_code=code)
     except Exception as exc:
@@ -45,7 +48,7 @@ async def run_job(job_id: str):
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "worker": "remote-gpu", "model": os.getenv("VIDEO_MODEL", "Wan2.2-TI2V-5B")}
+    return {"ok": True, "worker": "remote-gpu", "model": os.getenv("VIDEO_MODEL", "Wan2.2-TI2V-5B"), "runner_configured": bool(RUNNER)}
 
 @app.post("/jobs")
 async def create_job(job: Job):
@@ -59,7 +62,18 @@ async def create_job(job: Job):
 
 @app.get("/jobs/{job_id}")
 async def status(job_id: str):
-    status_file = ROOT / job_id / "status.json"
+    folder = ROOT / job_id
+    status_file = folder / "status.json"
     if not status_file.exists():
         raise HTTPException(404, "Job not found")
-    return {"job_id": job_id, **json.loads(status_file.read_text(encoding="utf-8"))}
+    data = json.loads(status_file.read_text(encoding="utf-8"))
+    if data.get("status") == "completed":
+        data["output_url"] = f"/jobs/{job_id}/video"
+    return {"job_id": job_id, **data}
+
+@app.get("/jobs/{job_id}/video")
+async def video(job_id: str):
+    output = ROOT / job_id / "final.mp4"
+    if not output.exists() or output.stat().st_size == 0:
+        raise HTTPException(404, "Video is not ready")
+    return FileResponse(output, media_type="video/mp4", filename=f"anteneh-{job_id}.mp4")
