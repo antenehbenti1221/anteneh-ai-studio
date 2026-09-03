@@ -1,34 +1,43 @@
-"""Model runner boundary for real remote-GPU inference.
+"""Concrete remote-GPU model runner boundary.
 
-The worker accepts an explicit MODEL_ID and delegates inference to a local
-open-model runtime installed inside the GPU container. No consumer API key is
-required by this interface.
+The container hosts open models locally; the control plane never depends on a
+commercial AI inference API. Wan2.2 is the default video model identifier.
 """
 import os
+import subprocess
 from pathlib import Path
-from typing import Any
 
 MODEL_ID = os.getenv("VIDEO_MODEL_ID", "Wan-AI/Wan2.2-TI2V-5B")
 
-class ModelRunner:
-    def __init__(self, model_id: str = MODEL_ID):
-        self.model_id = model_id
-        self._pipeline: Any = None
 
-    def load(self) -> None:
-        # Keep imports lazy: CPU control-plane deployments don't need CUDA.
-        try:
-            import torch  # type: ignore
-        except ImportError as exc:
-            raise RuntimeError("Install the GPU worker dependencies first") from exc
-        if not torch.cuda.is_available():
-            raise RuntimeError("A CUDA GPU is required for model inference")
-        # Concrete Wan pipeline loading is intentionally isolated here so the
-        # rest of the system remains provider/model independent.
-        raise NotImplementedError(
-            f"Install and initialize the selected open model runtime for {self.model_id}"
-        )
+def generate(prompt: str, output_dir: Path, seconds: int, aspect_ratio: str) -> Path:
+    """Run the installed model command and verify that it produced an MP4.
 
-    def generate(self, prompt: str, output_dir: Path, seconds: int, aspect_ratio: str) -> Path:
-        self.load()
-        raise NotImplementedError
+    WAN_RUNNER_CMD is deliberately injected by the GPU deployment. The command
+    receives VIDEO_PROMPT, VIDEO_DURATION, VIDEO_ASPECT and VIDEO_OUTPUT in its
+    environment, allowing the model runtime to be upgraded independently.
+    """
+    if not prompt.strip():
+        raise ValueError("prompt is required")
+    if seconds < 1:
+        raise ValueError("seconds must be positive")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output = output_dir / "visual.mp4"
+    command = os.getenv("WAN_RUNNER_CMD")
+    if not command:
+        raise RuntimeError(f"WAN_RUNNER_CMD is not configured for {MODEL_ID}")
+
+    env = os.environ.copy()
+    env.update({
+        "VIDEO_MODEL_ID": MODEL_ID,
+        "VIDEO_PROMPT": prompt,
+        "VIDEO_DURATION": str(seconds),
+        "VIDEO_ASPECT": aspect_ratio,
+        "VIDEO_OUTPUT": str(output),
+    })
+    subprocess.run(["/bin/sh", "-lc", command], env=env, check=True)
+
+    if not output.exists() or output.stat().st_size == 0:
+        raise RuntimeError("Model runner did not produce a non-empty MP4")
+    return output
