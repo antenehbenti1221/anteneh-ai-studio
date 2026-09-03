@@ -41,4 +41,4 @@ def handler(job):
     return {"status": "completed", "output": str(output_file)}
 
 
-runpod.serverless.start({"handler": handler})
+runpod.serverless.start(handler)
