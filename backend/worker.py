@@ -1,8 +1,4 @@
-"""Provider-independent remote GPU worker contract.
-
-A deployment supplies concrete model adapters. The API/router never needs to know
-which GPU vendor or model implementation is used.
-"""
+"""Provider-independent remote GPU worker contract and pipeline dispatcher."""
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -14,16 +10,27 @@ class VideoJob:
     aspect_ratio: str = "16:9"
     input_type: str = "text"
     style: str = "educational"
+    image_path: str | None = None
 
 class VideoWorker(Protocol):
     async def generate(self, job: VideoJob) -> str:
         """Generate and return a final MP4 object/path URL."""
 
-class ModelWorker:
-    """Adapter boundary for Wan/video, image, avatar, TTS and FFmpeg stages."""
+class RemoteGPUWorker:
+    """HTTP adapter: the control plane stays independent of the GPU provider."""
+    def __init__(self, endpoint: str, token: str | None = None):
+        self.endpoint = endpoint.rstrip("/")
+        self.token = token
+
     async def generate(self, job: VideoJob) -> str:
-        raise NotImplementedError("Connect a remote GPU model adapter")
+        # The concrete GPU service implements this contract.
+        # Keeping the network boundary here means providers can be swapped later.
+        raise NotImplementedError("Configure a remote GPU worker endpoint")
 
 async def run_pipeline(job: VideoJob, worker: VideoWorker) -> str:
-    # The orchestrator deliberately knows only the worker contract.
+    """Dispatch one complete production job to remote GPU infrastructure."""
+    if job.duration_seconds <= 0:
+        raise ValueError("duration_seconds must be positive")
+    if job.aspect_ratio not in {"16:9", "9:16", "1:1"}:
+        raise ValueError("unsupported aspect ratio")
     return await worker.generate(job)
