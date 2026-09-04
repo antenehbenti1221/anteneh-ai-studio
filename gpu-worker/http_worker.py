@@ -4,14 +4,16 @@ import json
 import os
 import uuid
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.4.0")
+app = FastAPI(title="Anteneh AI Studio GPU Worker", version="0.5.0")
 ROOT = Path(os.getenv("WORK_DIR", "/tmp/anteneh-ai-jobs"))
 ROOT.mkdir(parents=True, exist_ok=True)
 RUNNER = os.getenv("VIDEO_RUNNER_CMD", "python runner.py {job} {output}")
+WORKER_TOKEN = os.getenv("GPU_WORKER_TOKEN", "").strip()
 
 class Job(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
@@ -24,8 +26,17 @@ class Job(BaseModel):
     voice: str = "default"
     style: str = "educational"
 
+
+def require_token(authorization: str | None):
+    if WORKER_TOKEN and authorization != f"Bearer {WORKER_TOKEN}":
+        raise HTTPException(401, "Invalid worker token")
+
+
 def write_status(folder: Path, status: str, **extra):
-    (folder / "status.json").write_text(json.dumps({"status": status, **extra}), encoding="utf-8")
+    (folder / "status.json").write_text(
+        json.dumps({"status": status, **extra}), encoding="utf-8"
+    )
+
 
 async def run_job(job_id: str):
     folder = ROOT / job_id
@@ -43,12 +54,20 @@ async def run_job(job_id: str):
     except Exception as exc:
         write_status(folder, "failed", error=str(exc))
 
+
 @app.get("/health")
 async def health():
-    return {"ok": True, "worker": "remote-gpu", "model": os.getenv("VIDEO_MODEL", "Wan2.2-TI2V-5B"), "runner_configured": bool(os.getenv("VIDEO_COMMAND"))}
+    return {
+        "ok": True,
+        "worker": "remote-gpu",
+        "model": os.getenv("VIDEO_MODEL", "Wan2.1-T2V-1.3B"),
+        "runner_configured": bool(os.getenv("VIDEO_COMMAND") or os.getenv("VIDEO_RUNNER_CMD")),
+    }
+
 
 @app.post("/jobs")
-async def create_job(job: Job):
+async def create_job(job: Job, authorization: str | None = Header(default=None)):
+    require_token(authorization)
     job_id = str(uuid.uuid4())
     folder = ROOT / job_id
     folder.mkdir()
@@ -57,8 +76,10 @@ async def create_job(job: Job):
     asyncio.create_task(run_job(job_id))
     return {"job_id": job_id, "status": "queued"}
 
+
 @app.get("/jobs/{job_id}")
-async def status(job_id: str):
+async def status(job_id: str, authorization: str | None = Header(default=None)):
+    require_token(authorization)
     folder = ROOT / job_id
     status_file = folder / "status.json"
     if not status_file.exists():
@@ -68,8 +89,10 @@ async def status(job_id: str):
         data["output_url"] = f"/jobs/{job_id}/video"
     return {"job_id": job_id, **data}
 
+
 @app.get("/jobs/{job_id}/video")
-async def video(job_id: str):
+async def video(job_id: str, authorization: str | None = Header(default=None)):
+    require_token(authorization)
     output = ROOT / job_id / "final.mp4"
     if not output.exists() or output.stat().st_size == 0:
         raise HTTPException(404, "Video is not ready")
