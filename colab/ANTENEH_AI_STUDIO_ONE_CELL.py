@@ -1,6 +1,6 @@
 # ANTENEH AI STUDIO — ONE-CELL COLAB BOOTSTRAP
-# Automatic repair + startup for Wan2.1 T2V 1.3B.
-import os,sys,subprocess,time,re
+# Automatic repair + startup + REAL test job for Wan2.1 T2V 1.3B.
+import os,sys,subprocess,time,re,json
 from pathlib import Path
 STUDIO=Path('/content/anteneh-ai-studio'); WAN=Path('/content/Wan2.1'); MODEL=Path('/content/Wan2.1-T2V-1.3B'); WORK=Path('/content/anteneh-ai-jobs'); WORK.mkdir(parents=True,exist_ok=True)
 def sh(c,check=True): print('>',c); return subprocess.run(c,shell=True,check=check)
@@ -12,7 +12,6 @@ if not (STUDIO/'.git').exists(): sh('git clone https://github.com/antenehbenti12
 if not (WAN/'generate.py').exists():
     if WAN.exists(): sh('rm -rf /content/Wan2.1')
     sh('git clone --depth 1 https://github.com/Wan-Video/Wan2.1.git /content/Wan2.1')
-# Explicitly repair the dependency seen in the failed run.
 sh('pip install -q ftfy fastapi uvicorn requests huggingface_hub imageio imageio-ffmpeg')
 req=WAN/'requirements.txt'
 if req.exists():
@@ -20,7 +19,6 @@ if req.exists():
 required=[MODEL/'Wan2.1_VAE.pth',MODEL/'models_t5_umt5-xxl-enc-bf16.pth',MODEL/'diffusion_pytorch_model.safetensors']
 if not all(x.exists() for x in required): sh('hf download Wan-AI/Wan2.1-T2V-1.3B --local-dir /content/Wan2.1-T2V-1.3B')
 if not all(x.exists() for x in required): raise RuntimeError('Wan2.1 model is incomplete.')
-# Recreate adapter AFTER Wan source is present so recloning cannot erase it.
 adapter=WAN/'anteneh_wan_adapter.py'
 adapter.write_text(r'''import json,subprocess,sys
 from pathlib import Path
@@ -43,6 +41,7 @@ for _ in range(30):
     except: pass
     time.sleep(1)
 else: print(log_path.read_text(errors='ignore')[-12000:]); raise RuntimeError('Worker failed.')
+# Public tunnel
 cf=Path('/content/cloudflared')
 if not cf.exists(): sh('wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /content/cloudflared && chmod +x /content/cloudflared')
 sh('pkill -f cloudflared || true',False); time.sleep(2)
@@ -55,4 +54,18 @@ if not public: print(cf_log_path.read_text(errors='ignore')[-10000:]); raise Run
 Path('/content/anteneh-public-url.txt').write_text(public); print('PUBLIC URL:',public)
 try: print('PUBLIC HEALTH:',requests.get(public+'/health',timeout=30).json())
 except Exception as e: print('Public health:',e)
+# REAL generation smoke test: submit one short job and wait for completion.
+print('=== REAL VIDEO GENERATION TEST ===')
+prompt='A cinematic realistic scene of a thoughtful young Ethiopian man sitting at a wooden desk in the evening, looking at a notebook and thinking deeply about his future, warm realistic lighting, subtle camera movement.'
+try:
+    rr=requests.post('http://127.0.0.1:8000/jobs',json={'prompt':prompt,'duration_seconds':5},timeout=30)
+    print('TEST SUBMIT:',rr.status_code,rr.text)
+    if rr.ok:
+        jid=rr.json().get('id') or rr.json().get('job_id')
+        if jid:
+            for i in range(90):
+                time.sleep(5); st=requests.get(f'http://127.0.0.1:8000/jobs/{jid}',timeout=15)
+                print('TEST',i+1,st.text)
+                if st.ok and st.json().get('status') in ('completed','failed','error'): break
+except Exception as e: print('TEST ERROR:',repr(e))
 print('=== AUTOMATION ONLINE ==='); print('Worker:',public); print('Engine: Wan2.1 T2V 1.3B'); print('Keep Colab runtime running.')
