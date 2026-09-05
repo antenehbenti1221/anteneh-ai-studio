@@ -2,7 +2,7 @@
 
 The supported free-GPU path is **Lightning AI T4 + Wan2.1 T2V-1.3B**.
 
-Wan2.1's 1.3B T2V model is designed for 480P and is small enough for consumer GPUs; for low-VRAM operation the official guidance is to use model offloading and keep T5 on CPU. citeturn5search1turn2search2
+Wan2.1's 1.3B T2V model is designed for 480P and the official guidance recommends model offloading and keeping T5 on CPU when GPU memory is limited.
 
 ## Lightning one-command setup
 
