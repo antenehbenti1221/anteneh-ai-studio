@@ -1,22 +1,14 @@
-"""Concrete Wan2.2 TI2V-5B launcher for the remote GPU container.
-
-The official Wan repository is mounted/cloned at WAN_HOME. This wrapper maps our
-normalized job to Wan's generate.py CLI without putting model/vendor logic in
-the browser or control plane.
-"""
+"""Wan2.1 T2V-1.3B launcher for the Lightning T4 worker."""
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
-WAN_HOME = Path(os.getenv("WAN_HOME", "/opt/Wan2.2"))
-CKPT_DIR = os.getenv("WAN_CKPT_DIR", "/models/Wan2.2-TI2V-5B")
+WAN_HOME = Path(os.getenv("WAN_HOME", "/opt/Wan2.1"))
+CKPT_DIR = os.getenv("WAN_CKPT_DIR", "/models/Wan2.1-T2V-1.3B")
 
-SIZES = {
-    "16:9": "1280*704",
-    "9:16": "704*1280",
-}
+SIZES = {"16:9": "832*480", "9:16": "480*832"}
 
 
 def main() -> None:
@@ -25,29 +17,21 @@ def main() -> None:
     request = json.loads(Path(sys.argv[1]).read_text())
     output = Path(sys.argv[2])
     output.parent.mkdir(parents=True, exist_ok=True)
-    aspect = request.get("aspect_ratio", "16:9")
-    size = SIZES.get(aspect, "1280*704")
+    size = SIZES.get(request.get("aspect_ratio", "16:9"), "832*480")
+    test = bool(request.get("test", False))
     cmd = [
-        sys.executable,
-        str(WAN_HOME / "generate.py"),
-        "--task", "ti2v-5B",
-        "--size", size,
+        sys.executable, str(WAN_HOME / "generate.py"),
+        "--task", "t2v-1.3B", "--size", size,
+        "--frame_num", "17" if test else "81",
+        "--sample_steps", "25" if test else "50",
+        "--sample_shift", "8", "--sample_guide_scale", "6",
         "--ckpt_dir", CKPT_DIR,
-        "--offload_model", "True",
-        "--convert_model_dtype",
-        "--t5_cpu",
-        "--prompt", request["prompt"],
+        "--offload_model", "True", "--t5_cpu",
+        "--prompt", request["prompt"], "--save_file", str(output),
     ]
-    image = request.get("image")
-    if image:
-        cmd += ["--image", image]
     subprocess.run(cmd, cwd=WAN_HOME, check=True)
-    candidates = sorted(WAN_HOME.glob("**/*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not candidates:
-        raise RuntimeError("Wan completed without producing an MP4")
-    candidates[0].replace(output)
     if not output.exists() or output.stat().st_size == 0:
-        raise RuntimeError("Generated MP4 is missing or empty")
+        raise RuntimeError("Wan2.1 completed without producing a valid MP4")
 
 
 if __name__ == "__main__":
